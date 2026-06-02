@@ -178,3 +178,7 @@ npm run backend:build
 npm run backend:typecheck
 DATABASE_URL='postgresql://postgres:postgres@localhost:5432/ba_copilot?schema=public' npx prisma validate --schema apps/backend/prisma/schema.prisma
 ```
+
+## Troubleshooting
+
+If Render logs contain `query is too old`, `response timeout expired`, or `query ID is invalid`, it means a user clicked an old Telegram inline button. The bot ignores expired callback query acknowledgements and continues polling.

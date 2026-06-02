@@ -38,6 +38,10 @@ type ArtifactWithProjectContext = Artifact & {
   projectContext: ProjectContext;
 };
 
+interface TextMessageOptions {
+  reply_markup?: InlineKeyboard;
+}
+
 interface TelegramUserProfile {
   id: number;
   username?: string;
@@ -160,6 +164,7 @@ export class BotService implements OnModuleInit, OnApplicationShutdown {
 
     this.bot = new Bot(token);
     this.registerHandlers(this.bot);
+    this.attachGlobalErrorHandler(this.bot);
 
     await this.bot.api.setMyCommands([
       { command: 'start', description: 'Запустить бота' },
@@ -230,31 +235,46 @@ export class BotService implements OnModuleInit, OnApplicationShutdown {
     }
 
     bot.callbackQuery(/^project:set:([a-z0-9_-]+)$/, async (ctx) => {
+      await this.safeAnswerCallbackQuery(ctx);
       await this.handleProjectSelection(ctx, ctx.match[1]);
     });
 
     bot.callbackQuery(/^settings:language:(RU|EN)$/, async (ctx) => {
+      await this.safeAnswerCallbackQuery(ctx, 'Язык сохранён.');
       await this.handleLanguageSelection(ctx, ctx.match[1] as Language);
     });
 
     bot.callbackQuery(
       /^settings:tone:(SIMPLE|FORMAL|JIRA_READY|GOST_FORMAL)$/,
-      async (ctx) => this.handleToneSelection(ctx, ctx.match[1] as Tone),
+      async (ctx) => {
+        await this.safeAnswerCallbackQuery(ctx, 'Тон сохранён.');
+        await this.handleToneSelection(ctx, ctx.match[1] as Tone);
+      },
     );
 
-    bot.callbackQuery(/^settings:detail:(SHORT|MEDIUM|DETAILED)$/, async (ctx) =>
-      this.handleDetailSelection(ctx, ctx.match[1] as DetailLevel),
+    bot.callbackQuery(
+      /^settings:detail:(SHORT|MEDIUM|DETAILED)$/,
+      async (ctx) => {
+        await this.safeAnswerCallbackQuery(ctx, 'Детализация сохранена.');
+        await this.handleDetailSelection(ctx, ctx.match[1] as DetailLevel);
+      },
     );
 
     bot.callbackQuery(/^generate:type:([A-Z_0-9]+)$/, async (ctx) => {
+      await this.safeAnswerCallbackQuery(ctx, 'Генерирую результат...');
       await this.handleManualTypeSelection(ctx, ctx.match[1] as ArtifactType);
     });
 
     bot.callbackQuery(/^artifact:action:([a-zA-Z]+)$/, async (ctx) => {
+      await this.safeAnswerCallbackQuery(
+        ctx,
+        ctx.match[1] === 'history' ? undefined : 'Готовлю результат...',
+      );
       await this.handleArtifactAction(ctx, ctx.match[1]);
     });
 
     bot.callbackQuery(/^history:open:([0-9a-f-]+)$/, async (ctx) => {
+      await this.safeAnswerCallbackQuery(ctx);
       await this.handleOpenHistory(ctx, ctx.match[1]);
     });
 
@@ -423,7 +443,6 @@ export class BotService implements OnModuleInit, OnApplicationShutdown {
     const user = await this.resolveUser(ctx);
 
     if (!user) {
-      await ctx.answerCallbackQuery('Не удалось определить пользователя.');
       return;
     }
 
@@ -432,8 +451,8 @@ export class BotService implements OnModuleInit, OnApplicationShutdown {
       key,
     );
 
-    await ctx.answerCallbackQuery();
-    await ctx.editMessageText(
+    await this.safeEditMessageText(
+      ctx,
       `Контекст проекта изменён на: ${projectContext.name}`,
     );
   }
@@ -445,14 +464,12 @@ export class BotService implements OnModuleInit, OnApplicationShutdown {
     const user = await this.resolveUser(ctx);
 
     if (!user) {
-      await ctx.answerCallbackQuery('Не удалось определить пользователя.');
       return;
     }
 
     const settings = await this.settingsService.updateLanguage(user.id, language);
 
-    await ctx.answerCallbackQuery('Язык сохранён.');
-    await ctx.editMessageText(this.formatSettings(settings), {
+    await this.safeEditMessageText(ctx, this.formatSettings(settings), {
       reply_markup: this.buildSettingsKeyboard(),
     });
   }
@@ -461,14 +478,12 @@ export class BotService implements OnModuleInit, OnApplicationShutdown {
     const user = await this.resolveUser(ctx);
 
     if (!user) {
-      await ctx.answerCallbackQuery('Не удалось определить пользователя.');
       return;
     }
 
     const settings = await this.settingsService.updateTone(user.id, tone);
 
-    await ctx.answerCallbackQuery('Тон сохранён.');
-    await ctx.editMessageText(this.formatSettings(settings), {
+    await this.safeEditMessageText(ctx, this.formatSettings(settings), {
       reply_markup: this.buildSettingsKeyboard(),
     });
   }
@@ -480,7 +495,6 @@ export class BotService implements OnModuleInit, OnApplicationShutdown {
     const user = await this.resolveUser(ctx);
 
     if (!user) {
-      await ctx.answerCallbackQuery('Не удалось определить пользователя.');
       return;
     }
 
@@ -489,8 +503,7 @@ export class BotService implements OnModuleInit, OnApplicationShutdown {
       detailLevel,
     );
 
-    await ctx.answerCallbackQuery('Детализация сохранена.');
-    await ctx.editMessageText(this.formatSettings(settings), {
+    await this.safeEditMessageText(ctx, this.formatSettings(settings), {
       reply_markup: this.buildSettingsKeyboard(),
     });
   }
@@ -502,14 +515,12 @@ export class BotService implements OnModuleInit, OnApplicationShutdown {
     const user = await this.resolveUser(ctx);
 
     if (!user) {
-      await ctx.answerCallbackQuery('Не удалось определить пользователя.');
       return;
     }
 
     const session = await this.botSessionsService.getOrCreateForUser(user.id);
 
     if (!session.lastInputText) {
-      await ctx.answerCallbackQuery('Не найден исходный текст.');
       await ctx.reply('Не найден исходный текст. Отправь задачу ещё раз.');
       return;
     }
@@ -517,7 +528,6 @@ export class BotService implements OnModuleInit, OnApplicationShutdown {
     const settings = await this.settingsService.getOrCreateForUser(user.id);
     const projectContext = await this.resolveProjectContext(settings);
 
-    await ctx.answerCallbackQuery();
     await this.generateAndSend(
       ctx,
       user,
@@ -535,12 +545,10 @@ export class BotService implements OnModuleInit, OnApplicationShutdown {
     const user = await this.resolveUser(ctx);
 
     if (!user) {
-      await ctx.answerCallbackQuery('Не удалось определить пользователя.');
       return;
     }
 
     if (action === 'history') {
-      await ctx.answerCallbackQuery();
       await this.sendHistory(ctx, user.id);
       return;
     }
@@ -549,7 +557,6 @@ export class BotService implements OnModuleInit, OnApplicationShutdown {
 
     try {
       const artifactId = await this.botSessionsService.getLastArtifactId(user.id);
-      await ctx.answerCallbackQuery('Готовлю результат...');
       const result = await this.artifactActionService.runAction({
         artifactId,
         userSettings: settings,
@@ -576,10 +583,9 @@ export class BotService implements OnModuleInit, OnApplicationShutdown {
     try {
       const artifact = await this.artifactsService.getArtifactById(artifactId);
 
-      await ctx.answerCallbackQuery();
       await sendLongMessage(ctx, artifact.outputText);
     } catch {
-      await ctx.answerCallbackQuery('Артефакт не найден.');
+      await ctx.reply('Артефакт не найден.');
     }
   }
 
@@ -831,5 +837,62 @@ export class BotService implements OnModuleInit, OnApplicationShutdown {
     const payload = text.replace(pattern, '').trim();
 
     return payload === text ? undefined : payload;
+  }
+
+  private attachGlobalErrorHandler(bot: Bot): void {
+    bot.catch((err) => {
+      this.logger.error('Telegram bot error', this.toLogMessage(err.error));
+    });
+  }
+
+  private async safeAnswerCallbackQuery(
+    ctx: Context,
+    text?: string,
+  ): Promise<void> {
+    if (!ctx.callbackQuery) {
+      return;
+    }
+
+    try {
+      await ctx.answerCallbackQuery(text ? { text } : undefined);
+    } catch (error) {
+      const message = this.toLogMessage(error);
+
+      if (
+        message.includes('query is too old') ||
+        message.includes('response timeout expired') ||
+        message.includes('query ID is invalid')
+      ) {
+        this.logger.warn('Ignored expired callback query');
+        return;
+      }
+
+      this.logger.warn(`Failed to answer callback query: ${message}`);
+    }
+  }
+
+  private async safeEditMessageText(
+    ctx: Context,
+    text: string,
+    options?: TextMessageOptions,
+  ): Promise<void> {
+    try {
+      await ctx.editMessageText(text, options);
+    } catch (error) {
+      this.logger.warn(`Failed to edit message: ${this.toLogMessage(error)}`);
+      await ctx.reply(text, options).catch((replyError: unknown) => {
+        this.logger.warn(
+          `Failed to reply fallback: ${this.toLogMessage(replyError)}`,
+        );
+      });
+    }
+  }
+
+  private toLogMessage(error: unknown): string {
+    if (error instanceof Error) {
+      return error.message;
+    }
+
+    return String(error);
   }
 }
