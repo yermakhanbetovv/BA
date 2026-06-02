@@ -1,0 +1,158 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  USER
+  ADMIN
+}
+
+enum ArtifactType {
+  BUG
+  USER_STORY
+  TASK
+  FRONT_BACK_SPLIT
+  DAILY
+  JIRA_COMMENT
+  QUESTIONS
+  CHECKLIST
+  REQUIREMENTS_REVIEW
+  GOST34
+  UNKNOWN
+}
+
+enum ArtifactStatus {
+  GENERATED
+  SAVED
+  FAILED
+}
+
+enum Language {
+  RU
+  EN
+}
+
+enum Tone {
+  SIMPLE
+  FORMAL
+  JIRA_READY
+  GOST_FORMAL
+}
+
+enum DetailLevel {
+  SHORT
+  MEDIUM
+  DETAILED
+}
+
+enum BotSessionMode {
+  IDLE
+  WAITING_BUG
+  WAITING_STORY
+  WAITING_TASK
+  WAITING_SPLIT
+  WAITING_DAILY
+  WAITING_COMMENT
+  WAITING_QUESTIONS
+  WAITING_CHECKLIST
+  WAITING_REVIEW
+  WAITING_GOST
+}
+
+model User {
+  id                   String    @id @default(uuid()) @db.Uuid
+  telegramId           BigInt    @unique
+  username             String?
+  firstName            String?
+  lastName             String?
+  telegramLanguageCode String?
+  role                 UserRole  @default(USER)
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+  lastSeenAt           DateTime?
+
+  settings  UserSettings?
+  artifacts Artifact[]
+  session   BotSession?
+
+  @@index([telegramId])
+  @@index([role])
+  @@index([createdAt])
+}
+
+model BotSession {
+  id             String         @id @default(uuid()) @db.Uuid
+  userId         String         @unique @db.Uuid
+  mode           BotSessionMode @default(IDLE)
+  lastInputText  String?        @db.Text
+  lastArtifactId String?        @db.Uuid
+  metadata       Json?
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  user         User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  lastArtifact Artifact? @relation(fields: [lastArtifactId], references: [id], onDelete: SetNull)
+
+  @@index([mode])
+  @@index([lastArtifactId])
+}
+
+model UserSettings {
+  id                      String      @id @default(uuid()) @db.Uuid
+  userId                  String      @unique @db.Uuid
+  language                Language    @default(RU)
+  tone                    Tone        @default(SIMPLE)
+  detailLevel             DetailLevel @default(MEDIUM)
+  defaultProjectContextId String?     @db.Uuid
+  createdAt               DateTime    @default(now())
+  updatedAt               DateTime    @updatedAt
+
+  user                  User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  defaultProjectContext ProjectContext? @relation(fields: [defaultProjectContextId], references: [id], onDelete: SetNull)
+
+  @@index([defaultProjectContextId])
+}
+
+model ProjectContext {
+  id          String   @id @default(uuid()) @db.Uuid
+  key         String   @unique
+  name        String
+  description String
+  context     String   @db.Text
+  isDefault   Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  userSettings UserSettings[]
+  artifacts    Artifact[]
+
+  @@index([isDefault])
+}
+
+model Artifact {
+  id               String         @id @default(uuid()) @db.Uuid
+  userId           String         @db.Uuid
+  projectContextId String         @db.Uuid
+  type             ArtifactType   @default(UNKNOWN)
+  inputText        String         @db.Text
+  outputText       String         @db.Text
+  status           ArtifactStatus @default(GENERATED)
+  qualityScore     Int?
+  metadata         Json?
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+
+  user           User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  projectContext ProjectContext @relation(fields: [projectContextId], references: [id], onDelete: Restrict)
+  botSessions    BotSession[]
+
+  @@index([userId, createdAt])
+  @@index([projectContextId])
+  @@index([type])
+  @@index([status])
+}

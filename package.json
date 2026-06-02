@@ -1,0 +1,20 @@
+{
+  "name": "ba-copilot-bot",
+  "version": "0.1.0",
+  "private": true,
+  "workspaces": [
+    "apps/backend"
+  ],
+  "scripts": {
+    "backend:dev": "npm run start:dev -w apps/backend",
+    "backend:build": "npm run build -w apps/backend",
+    "backend:typecheck": "npm run typecheck -w apps/backend",
+    "backend:test": "npm run test -w apps/backend",
+    "prisma:generate": "npm run prisma:generate -w apps/backend",
+    "prisma:migrate": "npm run prisma:migrate -w apps/backend",
+    "prisma:seed": "npm run prisma:seed -w apps/backend"
+  },
+  "engines": {
+    "node": ">=20.11.0"
+  }
+}
